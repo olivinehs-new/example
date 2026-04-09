@@ -1,4 +1,4 @@
-﻿const fs = require("fs");
+const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const cheerio = require("cheerio");
@@ -30,6 +30,97 @@ function parseDate(text) {
   if (!match) return null;
   const [, yyyy, mm, dd] = match;
   return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+}
+
+function cleanDepartmentToken(raw) {
+  let value = String(raw || "")
+    .replace(/\(.*?\)/g, " ")
+    .replace(/[|,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value) return null;
+
+  const compactHits =
+    value.match(/[\uAC00-\uD7A3A-Za-z0-9]{2,30}(?:\uB2F4\uB2F9\uAD00|\uC815\uCC45\uAD00|\uAE30\uD68D\uAD00|\uC9C0\uC6D0\uB2E8|\uC13C\uD130|\uC704\uC6D0\uD68C|\uBCF8\uBD80|\uAD6D|\uACFC|\uD300)/g) || [];
+  if (compactHits.length) {
+    compactHits.sort((a, b) => b.length - a.length);
+    value = compactHits[0];
+  }
+
+  if (!/[\uAC00-\uD7A3]/.test(value)) return null;
+  if (value.length < 2 || value.length > 24) return null;
+  if (!/(\uB2F4\uB2F9\uAD00|\uC815\uCC45\uAD00|\uAE30\uD68D\uAD00|\uC9C0\uC6D0\uB2E8|\uC13C\uD130|\uC704\uC6D0\uD68C|\uBCF8\uBD80|\uAD6D|\uACFC|\uD300)$/.test(value)) return null;
+
+  const blocked = new Set(["\uACE0\uC6A9\uB178\uB3D9\uBD80", "\uBB38\uC758", "\uB2F4\uB2F9", "\uBCF4\uB3C4\uC790\uB8CC", "\uCC38\uACE0"]);
+  if (blocked.has(value)) return null;
+  return value;
+}
+
+function extractFooterDepartment($, wholeText, contentText = "") {
+  const footerChunks = [];
+  const footerSelectors = [
+    "#contents .board_view + *",
+    "#contents .board_view_info",
+    "#contents .view_info",
+    "#contents .board_info",
+    "#contents .contact",
+    "#contents .report_info",
+    "#contents dl",
+    "#contents table",
+    ".board_view + *",
+    ".board_view_info",
+    ".view_info",
+    ".board_info",
+    ".contact",
+    ".report_info",
+  ];
+
+  for (const selector of footerSelectors) {
+    $(selector).each((_, el) => {
+      const t = normalizeText($(el).text());
+      if (t) footerChunks.push(t);
+    });
+  }
+
+  const normalizedWhole = normalizeText(wholeText || "");
+  if (normalizedWhole) {
+    const tail = normalizedWhole.slice(Math.max(0, normalizedWhole.length - 1400));
+    footerChunks.push(tail);
+  }
+
+  const normalizedContent = normalizeText(contentText || "");
+  if (normalizedContent) {
+    const contentTail = normalizedContent.slice(Math.max(0, normalizedContent.length - 1000));
+    footerChunks.push(contentTail);
+  }
+
+  const markerRegex = new RegExp(
+    "(?:\\uB2F4\\s*\\uB2F9\\s*\\uBD80\\s*\\uC11C|\\uB2F4\\s*\\uB2F9|\\uBB38\\s*\\uC758|\\uC18C\\s*\\uAD00\\s*\\uBD80\\s*\\uC11C)\\s*[:：]?\\s*([^\\n\\r|]{2,80})",
+    "g",
+  );
+  for (let i = footerChunks.length - 1; i >= 0; i -= 1) {
+    const chunk = footerChunks[i];
+    let match;
+    const candidates = [];
+    while ((match = markerRegex.exec(chunk)) !== null) {
+      const cleaned = cleanDepartmentToken(match[1]);
+      if (cleaned) candidates.push(cleaned);
+    }
+    if (candidates.length) return candidates[candidates.length - 1];
+  }
+
+  for (let i = footerChunks.length - 1; i >= 0; i -= 1) {
+    const chunk = footerChunks[i];
+    const hits =
+      chunk.match(/[\uAC00-\uD7A3]{2,20}(?:\uB2F4\uB2F9\uAD00|\uC815\uCC45\uAD00|\uAE30\uD68D\uAD00|\uC9C0\uC6D0\uB2E8|\uC13C\uD130|\uC704\uC6D0\uD68C|\uBCF8\uBD80|\uAD6D|\uACFC|\uD300)/g) || [];
+    if (!hits.length) continue;
+    for (let j = hits.length - 1; j >= 0; j -= 1) {
+      const cleaned = cleanDepartmentToken(hits[j]);
+      if (cleaned) return cleaned;
+    }
+  }
+
+  return MISANG;
 }
 
 function pickMainContent($) {
@@ -186,13 +277,14 @@ async function fetchDetail(newsSeq) {
   const content = pickMainContent($);
   const wholeText = normalizeText($("body").text());
   const date = parseDate(wholeText) || parseDate(content) || parseDate(title);
+  const footerDepartment = extractFooterDepartment($, wholeText, content);
 
   return {
     newsSeq: String(newsSeq),
     title,
     date,
-    // Department must be assigned only from law.go.kr dictionary in build-model.
-    department: MISANG,
+    // Use only footer contact department from each press release page.
+    department: footerDepartment || MISANG,
     content,
     url,
     crawledAt: new Date().toISOString(),
@@ -281,7 +373,7 @@ async function run(options) {
       ...item,
       title: !isGenericTitle(item.title) ? item.title : meta.title,
       date: item.date || meta.date,
-      department: MISANG,
+      department: item.department || MISANG,
     };
   });
 

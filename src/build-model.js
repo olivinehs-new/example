@@ -1,4 +1,4 @@
-﻿const fs = require("fs");
+const fs = require("fs");
 const path = require("path");
 const { Command } = require("commander");
 const {
@@ -36,10 +36,13 @@ function run(options) {
 
   const docs = rows.map((r) => {
     const text = normalizeText(`${r.title} ${r.content}`);
-    // Ignore parser-provided department labels from press releases.
-    // Use law.go.kr dictionary matching only.
-    const guessed = guessDepartmentFromText(text, legalData);
-    const department = normalizeDepartmentName(guessed || "", legalData);
+    // Prefer department parsed from the footer of each press release.
+    // If footer department is unavailable/invalid, fall back to legal dictionary text matching.
+    const footerDepartment = normalizeDepartmentName(r.department, legalData);
+    const guessed = footerDepartment === MISANG ? guessDepartmentFromText(text, legalData) : null;
+    const department = footerDepartment !== MISANG
+      ? footerDepartment
+      : normalizeDepartmentName(guessed || "", legalData);
     return {
       ...r,
       department,
