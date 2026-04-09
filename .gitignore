@@ -2,3 +2,5 @@ node_modules/
 data/*.csv
 data/*.json
 model/*.json
+!data/moel_legal_departments.json
+!model/moel_doc_classifier.json

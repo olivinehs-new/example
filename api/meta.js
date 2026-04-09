@@ -18,13 +18,17 @@ module.exports = async (req, res) => {
 
   const modelPath = path.resolve(process.cwd(), process.env.MODEL_PATH || "model/moel_doc_classifier.json");
   const legalPath = path.resolve(process.cwd(), process.env.LEGAL_PATH || "data/moel_legal_departments.json");
+  const modelExists = fs.existsSync(modelPath);
+  const legalExists = fs.existsSync(legalPath);
 
-  const model = readJsonSafe(modelPath);
-  const legal = readJsonSafe(legalPath);
+  const model = modelExists ? readJsonSafe(modelPath) : null;
+  const legal = legalExists ? readJsonSafe(legalPath) : null;
 
   res.status(200).json({
     modelPath,
     legalPath,
+    modelExists,
+    legalExists,
     modelMeta: model?.meta || null,
     legalMeta: legal?.meta || null,
   });

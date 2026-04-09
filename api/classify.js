@@ -3,8 +3,6 @@ const os = require("os");
 const path = require("path");
 const { IncomingForm } = require("formidable");
 const iconv = require("iconv-lite");
-const mammoth = require("mammoth");
-const pdf = require("pdf-parse");
 const { classifyWithModelPath } = require("../src/classifier-core");
 
 function parseMultipart(req) {
@@ -56,10 +54,12 @@ async function extractTextFromUploadedFile(file) {
   const buffer = fs.readFileSync(filepath);
 
   if (ext === ".pdf") {
+    const pdf = require("pdf-parse");
     const parsed = await pdf(buffer);
     return parsed.text || "";
   }
   if (ext === ".docx") {
+    const mammoth = require("mammoth");
     const result = await mammoth.extractRawText({ buffer });
     return result.value || "";
   }
@@ -73,6 +73,26 @@ module.exports = async (req, res) => {
   }
 
   try {
+    const modelPath = process.env.MODEL_PATH || "model/moel_doc_classifier.json";
+    const legalPath = process.env.LEGAL_PATH || "data/moel_legal_departments.json";
+    const absModelPath = path.resolve(process.cwd(), modelPath);
+    const absLegalPath = path.resolve(process.cwd(), legalPath);
+
+    if (!fs.existsSync(absModelPath)) {
+      res.status(503).json({
+        error: "Model file is missing in deployment.",
+        modelPath: absModelPath,
+      });
+      return;
+    }
+    if (!fs.existsSync(absLegalPath)) {
+      res.status(503).json({
+        error: "Legal department dictionary file is missing in deployment.",
+        legalPath: absLegalPath,
+      });
+      return;
+    }
+
     const contentType = String(req.headers["content-type"] || "");
     let textInput = "";
     let topK = 5;
@@ -110,8 +130,8 @@ module.exports = async (req, res) => {
     }
 
     const result = classifyWithModelPath({
-      modelPath: process.env.MODEL_PATH || "model/moel_doc_classifier.json",
-      legalPath: process.env.LEGAL_PATH || "data/moel_legal_departments.json",
+      modelPath,
+      legalPath,
       text,
       topK,
       topics,
