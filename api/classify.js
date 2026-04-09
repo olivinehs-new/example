@@ -4,7 +4,11 @@ const path = require("path");
 const { IncomingForm } = require("formidable");
 const iconv = require("iconv-lite");
 const { classifyWithModelPath } = require("../src/classifier-core");
-const { resolveAssetPath } = require("../src/runtime-paths");
+const {
+  resolveAssetPathWithFallback,
+  defaultModelUrl,
+  defaultLegalUrl,
+} = require("../src/runtime-paths");
 
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
@@ -76,8 +80,16 @@ module.exports = async (req, res) => {
   try {
     const modelRelPath = process.env.MODEL_PATH || "model/moel_doc_classifier.json";
     const legalRelPath = process.env.LEGAL_PATH || "data/moel_legal_departments.json";
-    const absModelPath = resolveAssetPath(modelRelPath);
-    const absLegalPath = resolveAssetPath(legalRelPath);
+    const absModelPath = await resolveAssetPathWithFallback(
+      modelRelPath,
+      defaultModelUrl(),
+      "moel_doc_classifier.json",
+    );
+    const absLegalPath = await resolveAssetPathWithFallback(
+      legalRelPath,
+      defaultLegalUrl(),
+      "moel_legal_departments.json",
+    );
 
     if (!fs.existsSync(absModelPath)) {
       res.status(503).json({

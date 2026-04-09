@@ -1,6 +1,10 @@
 const fs = require("fs");
-const path = require("path");
-const { resolveAssetPath, candidateRoots } = require("../src/runtime-paths");
+const {
+  resolveAssetPathWithFallback,
+  candidateRoots,
+  defaultModelUrl,
+  defaultLegalUrl,
+} = require("../src/runtime-paths");
 
 function readJsonSafe(filePath) {
   try {
@@ -17,8 +21,18 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const modelPath = resolveAssetPath(process.env.MODEL_PATH || "model/moel_doc_classifier.json");
-  const legalPath = resolveAssetPath(process.env.LEGAL_PATH || "data/moel_legal_departments.json");
+  const modelRelPath = process.env.MODEL_PATH || "model/moel_doc_classifier.json";
+  const legalRelPath = process.env.LEGAL_PATH || "data/moel_legal_departments.json";
+  const modelPath = await resolveAssetPathWithFallback(
+    modelRelPath,
+    defaultModelUrl(),
+    "moel_doc_classifier.json",
+  );
+  const legalPath = await resolveAssetPathWithFallback(
+    legalRelPath,
+    defaultLegalUrl(),
+    "moel_legal_departments.json",
+  );
   const modelExists = fs.existsSync(modelPath);
   const legalExists = fs.existsSync(legalPath);
 
@@ -28,6 +42,10 @@ module.exports = async (req, res) => {
   res.status(200).json({
     cwd: process.cwd(),
     roots: candidateRoots(),
+    modelRelPath,
+    legalRelPath,
+    modelFallbackUrl: defaultModelUrl(),
+    legalFallbackUrl: defaultLegalUrl(),
     modelPath,
     legalPath,
     modelExists,
