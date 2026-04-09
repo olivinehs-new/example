@@ -1,5 +1,19 @@
 {
   "version": 2,
+  "functions": {
+    "api/classify.js": {
+      "includeFiles": [
+        "model/moel_doc_classifier.json",
+        "data/moel_legal_departments.json"
+      ]
+    },
+    "api/meta.js": {
+      "includeFiles": [
+        "model/moel_doc_classifier.json",
+        "data/moel_legal_departments.json"
+      ]
+    }
+  },
   "rewrites": [
     { "source": "/", "destination": "/public/index.html" },
     { "source": "/app.js", "destination": "/public/app.js" },
