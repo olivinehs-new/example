@@ -4,6 +4,7 @@ const path = require("path");
 const { IncomingForm } = require("formidable");
 const iconv = require("iconv-lite");
 const { classifyWithModelPath } = require("../src/classifier-core");
+const { resolveAssetPath } = require("../src/runtime-paths");
 
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
@@ -73,10 +74,10 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const modelPath = process.env.MODEL_PATH || "model/moel_doc_classifier.json";
-    const legalPath = process.env.LEGAL_PATH || "data/moel_legal_departments.json";
-    const absModelPath = path.resolve(process.cwd(), modelPath);
-    const absLegalPath = path.resolve(process.cwd(), legalPath);
+    const modelRelPath = process.env.MODEL_PATH || "model/moel_doc_classifier.json";
+    const legalRelPath = process.env.LEGAL_PATH || "data/moel_legal_departments.json";
+    const absModelPath = resolveAssetPath(modelRelPath);
+    const absLegalPath = resolveAssetPath(legalRelPath);
 
     if (!fs.existsSync(absModelPath)) {
       res.status(503).json({
@@ -130,8 +131,8 @@ module.exports = async (req, res) => {
     }
 
     const result = classifyWithModelPath({
-      modelPath,
-      legalPath,
+      modelPath: absModelPath,
+      legalPath: absLegalPath,
       text,
       topK,
       topics,

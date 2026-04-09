@@ -3,13 +3,13 @@
   "functions": {
     "api/classify.js": {
       "includeFiles": [
-        "model/moel_doc_classifier.json",
+        "model/**/*.json",
         "data/moel_legal_departments.json"
       ]
     },
     "api/meta.js": {
       "includeFiles": [
-        "model/moel_doc_classifier.json",
+        "model/**/*.json",
         "data/moel_legal_departments.json"
       ]
     }
