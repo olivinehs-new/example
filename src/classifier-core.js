@@ -2,7 +2,6 @@ const fs = require("fs");
 const path = require("path");
 const {
   vectorize,
-  cosineSparse,
   topKeywords,
   normalizeText,
 } = require("./text-utils");
@@ -11,15 +10,53 @@ const {
   legalDepartmentKeywordScore,
   normalizeDepartmentName,
 } = require("./department-utils");
+const { cosineQueryMapToSparseArray } = require("./model-format");
 
 function loadModel(modelPath) {
   const raw = fs.readFileSync(path.resolve(modelPath), "utf8").replace(/^\uFEFF/, "");
   return JSON.parse(raw);
 }
 
-function predictDepartment(queryVector, centroids, queryText, legalData = null) {
+function toIdfDict(model) {
+  if (Array.isArray(model.terms) && Array.isArray(model.idf)) {
+    const out = {};
+    for (let i = 0; i < model.terms.length; i += 1) {
+      out[model.terms[i]] = model.idf[i];
+    }
+    return out;
+  }
+  return model.idf || {};
+}
+
+function queryVectorToIdMap(queryVector, model) {
+  if (!Array.isArray(model.terms)) return queryVector;
+  const termToId = {};
+  for (let i = 0; i < model.terms.length; i += 1) {
+    termToId[model.terms[i]] = i;
+  }
+  const out = {};
+  for (const [term, w] of Object.entries(queryVector || {})) {
+    const id = termToId[term];
+    if (id !== undefined) out[id] = w;
+  }
+  return out;
+}
+
+function cosineAgainstStored(queryIdMap, storedVec) {
+  if (Array.isArray(storedVec)) {
+    return cosineQueryMapToSparseArray(queryIdMap, storedVec);
+  }
+  let dot = 0;
+  for (const [k, v] of Object.entries(storedVec || {})) {
+    const q = queryIdMap[k];
+    if (q) dot += q * v;
+  }
+  return dot;
+}
+
+function predictDepartment(queryIdMap, centroids, queryText, legalData = null) {
   const scored = Object.entries(centroids).map(([dept, vec]) => {
-    const cosine = cosineSparse(queryVector, vec);
+    const cosine = cosineAgainstStored(queryIdMap, vec);
     const legalScore = legalDepartmentKeywordScore(queryText, dept);
     return {
       department: dept,
@@ -32,10 +69,10 @@ function predictDepartment(queryVector, centroids, queryText, legalData = null) 
   return scored;
 }
 
-function retrieveSimilarDocs(queryVector, documents, topK = 5) {
+function retrieveSimilarDocs(queryIdMap, documents, topK = 5) {
   const scored = documents.map((doc) => ({
     ...doc,
-    similarity: cosineSparse(queryVector, doc.vector || {}),
+    similarity: cosineAgainstStored(queryIdMap, doc.vector || {}),
   }));
   scored.sort((a, b) => b.similarity - a.similarity);
   return scored.slice(0, topK);
@@ -63,15 +100,17 @@ function classifyText({
   legalData = null,
 }) {
   const queryText = normalizeText(text);
-  const queryVector = vectorize(queryText, model.idf);
+  const idfDict = toIdfDict(model);
+  const queryVector = vectorize(queryText, idfDict);
+  const queryIdMap = queryVectorToIdMap(queryVector, model);
   const depRanking = predictDepartment(
-    queryVector,
+    queryIdMap,
     model.departmentCentroids,
     queryText,
     legalData,
   );
-  const similar = retrieveSimilarDocs(queryVector, model.documents, Number(topK));
-  const mainTopics = aggregateTopics(queryText, similar, model.idf, Number(topics));
+  const similar = retrieveSimilarDocs(queryIdMap, model.documents, Number(topK));
+  const mainTopics = aggregateTopics(queryText, similar, idfDict, Number(topics));
 
   return {
     predictedDepartment: normalizeDepartmentName(depRanking[0]?.department || "미상", legalData),

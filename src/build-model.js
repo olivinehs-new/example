@@ -14,6 +14,7 @@ const {
   normalizeDepartmentName,
   guessDepartmentFromText,
 } = require("./department-utils");
+const { buildTermIndex, encodeSparseVector } = require("./model-format");
 
 function loadJson(filePath) {
   const raw = fs.readFileSync(path.resolve(filePath), "utf8").replace(/^\uFEFF/, "");
@@ -42,8 +43,11 @@ function run(options) {
     };
   });
 
-  const idf = buildIdf(docs.map((d) => d.text), 2, 70000);
+  const maxFeatures = Number(options.maxFeatures || 25000);
+  const clipSize = Number(options.clip || 90);
+  const idf = buildIdf(docs.map((d) => d.text), 2, maxFeatures);
   const vectors = docs.map((d) => vectorize(d.text, idf));
+  const { terms, termToId, idf: idfArray } = buildTermIndex(idf);
 
   const deptBuckets = new Map();
   docs.forEach((doc, i) => {
@@ -67,8 +71,13 @@ function run(options) {
     department: doc.department || "미상",
     url: doc.url,
     keywords: topKeywords(doc.text, idf, 6),
-    vector: clipVector(vectors[i], 220),
+    vector: encodeSparseVector(clipVector(vectors[i], clipSize), termToId),
   }));
+
+  const compactCentroids = {};
+  for (const [dept, vec] of Object.entries(deptCentroids)) {
+    compactCentroids[dept] = encodeSparseVector(vec, termToId);
+  }
 
   const model = {
     meta: {
@@ -77,9 +86,13 @@ function run(options) {
       departmentSize: Object.keys(deptCentroids).length,
       source: "고용노동부 보도자료 최근 3년",
       legalReference: legalData.meta || null,
+      format: "compact-v1",
+      features: terms.length,
+      clipSize,
     },
-    idf,
-    departmentCentroids: deptCentroids,
+    terms,
+    idf: idfArray,
+    departmentCentroids: compactCentroids,
     documents: modelDocs,
   };
 
@@ -95,6 +108,8 @@ program
   .requiredOption("--input <path>", "training data json")
   .requiredOption("--output <path>", "model output json")
   .option("--minDeptDocs <number>", "minimum documents per department", "3")
+  .option("--maxFeatures <number>", "maximum tf-idf features", "25000")
+  .option("--clip <number>", "max sparse terms per document vector", "90")
   .option("--legal <path>", "legal department dictionary json", "data/moel_legal_departments.json");
 
 program.parse(process.argv);
