@@ -38,58 +38,26 @@ async function loadMeta() {
   }
 }
 
-function yesNo(v) {
-  return v ? "예" : "아니오";
-}
-
 function formatClassifyResult(payload) {
   const r = payload?.result || {};
-  const likely = Array.isArray(r.likelyDepartments) ? r.likelyDepartments : [];
-  const pressMatched = Array.isArray(r.pressMatchedDepartments) ? r.pressMatchedDepartments : [];
+  const summary = r.inputSummary || {};
+  const ranked = (Array.isArray(r.likelyDepartments) ? [...r.likelyDepartments] : [])
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
 
   const lines = [];
-  if (r.inputSummary) {
-    lines.push("[AI 요약]");
-    lines.push(`- 요약문: ${r.inputSummary.summaryText || ""}`);
-    lines.push(`- 길이: 원문 ${r.inputSummary.originalLength || 0}자 -> 요약 ${r.inputSummary.summaryLength || 0}자`);
-    lines.push("");
-  }
-
-  lines.push("[예측 부서]");
-  lines.push(`- 부서: ${r.predictedDepartment || "미상"}`);
-  lines.push(`- 신뢰도: ${Number(r.confidence || 0).toFixed(4)}`);
-
-  if (r.predictedDepartmentDetail) {
-    lines.push(`- 보도자료 매칭: ${yesNo(r.predictedDepartmentDetail.matchedInPress)}`);
-    lines.push(`- 유사 보도자료 상위매칭: ${yesNo(r.predictedDepartmentDetail.matchedInSimilarReferences)}`);
-    lines.push(`- 고용노동부 직제 포함: ${yesNo(r.predictedDepartmentDetail.inMoelOrganization)}`);
-    lines.push(`- 법령 상단표출 과 포함: ${yesNo(r.predictedDepartmentDetail.inLawTopDepartments)}`);
-  }
-
+  lines.push("[AI요약]");
+  lines.push(summary.summaryText || "요약 정보가 없습니다.");
   lines.push("");
-  lines.push("[가능성 높은 부서]");
-  if (!likely.length) {
+
+  lines.push("[부서 순위]");
+  if (!ranked.length) {
     lines.push("- 없음");
   } else {
-    likely.forEach((d, i) => {
-      lines.push(
-        `${i + 1}. ${d.department} | score=${Number(d.score || 0).toFixed(4)} | 보도자료=${yesNo(d.matchedInPress)} | 직제=${yesNo(d.inMoelOrganization)} | 상단과=${yesNo(d.inLawTopDepartments)}`,
-      );
+    ranked.forEach((d, i) => {
+      lines.push(`${i + 1}. ${d.department || "미상"} | score=${Number(d.score || 0).toFixed(4)}`);
     });
   }
 
-  lines.push("");
-  lines.push("[보도자료 직접 매칭 부서(유사문서 기준)]");
-  if (!pressMatched.length) {
-    lines.push("- 없음");
-  } else {
-    pressMatched.forEach((d, i) => {
-      lines.push(`${i + 1}. ${d.department} | 매칭건수=${d.matchedCount} | 최대유사도=${Number(d.maxSimilarity || 0).toFixed(4)}`);
-    });
-  }
-
-  lines.push("\n[RAW JSON]");
-  lines.push(JSON.stringify(payload, null, 2));
   return lines.join("\n");
 }
 
