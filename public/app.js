@@ -1,4 +1,4 @@
-﻿const form = document.getElementById("classifyForm");
+const form = document.getElementById("classifyForm");
 const resultBox = document.getElementById("resultBox");
 const metaBox = document.getElementById("metaBox");
 const submitBtn = document.getElementById("submitBtn");
@@ -48,6 +48,13 @@ function formatClassifyResult(payload) {
   const pressMatched = Array.isArray(r.pressMatchedDepartments) ? r.pressMatchedDepartments : [];
 
   const lines = [];
+  if (r.inputSummary) {
+    lines.push("[AI 요약]");
+    lines.push(`- 요약문: ${r.inputSummary.summaryText || ""}`);
+    lines.push(`- 길이: 원문 ${r.inputSummary.originalLength || 0}자 → 요약 ${r.inputSummary.summaryLength || 0}자`);
+    lines.push("");
+  }
+
   lines.push("[예측 부서]");
   lines.push(`- 부서: ${r.predictedDepartment || "미상"}`);
   lines.push(`- 신뢰도: ${Number(r.confidence || 0).toFixed(4)}`);

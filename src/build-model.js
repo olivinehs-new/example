@@ -1,4 +1,4 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const path = require("path");
 const { Command } = require("commander");
 const {
@@ -16,6 +16,8 @@ const {
 } = require("./department-utils");
 const { buildTermIndex, encodeSparseVector } = require("./model-format");
 
+const MISANG = "\uBBF8\uC0C1";
+
 function loadJson(filePath) {
   const raw = fs.readFileSync(path.resolve(filePath), "utf8").replace(/^\uFEFF/, "");
   return JSON.parse(raw);
@@ -29,16 +31,18 @@ function run(options) {
 
   const rows = loadJson(inputPath).filter((r) => r && r.title && r.content);
   if (!rows.length) {
-    throw new Error("학습 데이터가 비어 있습니다.");
+    throw new Error("Training data is empty.");
   }
 
   const docs = rows.map((r) => {
     const text = normalizeText(`${r.title} ${r.content}`);
-    const normalized = normalizeDepartmentName(r.department, legalData);
-    const guessed = normalized === "미상" ? guessDepartmentFromText(text, legalData) : null;
+    // Ignore parser-provided department labels from press releases.
+    // Use law.go.kr dictionary matching only.
+    const guessed = guessDepartmentFromText(text, legalData);
+    const department = normalizeDepartmentName(guessed || "", legalData);
     return {
       ...r,
-      department: guessed || normalized,
+      department,
       text,
     };
   });
@@ -51,8 +55,8 @@ function run(options) {
 
   const deptBuckets = new Map();
   docs.forEach((doc, i) => {
-    const dept = doc.department || "미상";
-    if (dept === "미상") return;
+    const dept = doc.department || MISANG;
+    if (dept === MISANG) return;
     if (!deptBuckets.has(dept)) deptBuckets.set(dept, []);
     deptBuckets.get(dept).push(vectors[i]);
   });
@@ -68,7 +72,7 @@ function run(options) {
     newsSeq: doc.newsSeq,
     date: doc.date,
     title: doc.title,
-    department: doc.department || "미상",
+    department: doc.department || MISANG,
     url: doc.url,
     keywords: topKeywords(doc.text, idf, 6),
     vector: encodeSparseVector(clipVector(vectors[i], clipSize), termToId),
@@ -84,7 +88,7 @@ function run(options) {
       createdAt: new Date().toISOString(),
       dataSize: modelDocs.length,
       departmentSize: Object.keys(deptCentroids).length,
-      source: "고용노동부 보도자료 최근 3년",
+      source: "moel press releases recent 3 years",
       legalReference: legalData.meta || null,
       format: "compact-v1",
       features: terms.length,

@@ -1,4 +1,4 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const cheerio = require("cheerio");
@@ -9,6 +9,7 @@ const { normalizeText } = require("./text-utils");
 const BASE = "https://www.moel.go.kr";
 const LIST_URL = `${BASE}/news/enews/report/enewsList.do`;
 const VIEW_URL = `${BASE}/news/enews/report/enewsView.do?news_seq=`;
+const MISANG = "\uBBF8\uC0C1";
 
 const ARTICLE_SELECTORS = [
   "#contents .board_view",
@@ -21,7 +22,7 @@ const ARTICLE_SELECTORS = [
 
 function isGenericTitle(title) {
   const t = normalizeText(title);
-  return !t || /^보도(?:참고)?자료$/.test(t);
+  return !t || /^\uBCF4\uB3C4(?:\uCC38\uACE0)?\uC790\uB8CC$/.test(t);
 }
 
 function parseDate(text) {
@@ -31,61 +32,11 @@ function parseDate(text) {
   return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
 }
 
-function cleanupDepartment(raw) {
-  if (!raw) return null;
-  let v = raw
-    .replace(/\(.*?\)/g, " ")
-    .replace(/[|]/g, " ")
-    .replace(/[0-9]{2,4}-[0-9]{3,4}-[0-9]{4}/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const hits =
-    v.match(
-      /[가-힣A-Za-z0-9·\s]{3,40}?(?:담당관|정책관|지원단|상황실|센터|위원회|사무국|본부|과|국|팀)/g,
-    ) || [];
-  if (!hits.length) return null;
-  hits.sort((a, b) => b.length - a.length);
-  const primary = hits[0].trim();
-  const compactHits =
-    primary.match(
-      /[가-힣A-Za-z0-9·]+(?:담당관|정책관|지원단|상황실|센터|위원회|사무국|본부|과|국|팀)/g,
-    ) || [];
-  if (compactHits.length) {
-    compactHits.sort((a, b) => b.length - a.length);
-    return compactHits[0];
-  }
-  return primary;
-}
-
-function extractDepartment(text) {
-  const normalized = String(text || "").replace(/\s+/g, " ");
-  const patterns = [
-    /담당\s*부서\s*[:：]?\s*([^\n\r]{2,80})/i,
-    /문\s*의\s*[:：]?\s*([^\n\r]{2,80})/i,
-    /소관\s*부서\s*[:：]?\s*([^\n\r]{2,80})/i,
-  ];
-  for (const pattern of patterns) {
-    const m = normalized.match(pattern);
-    if (m) {
-      const dept = cleanupDepartment(m[1]);
-      if (dept) return dept;
-    }
-  }
-  const parenHits = normalized.match(/\(([가-힣A-Za-z0-9·\s]+?(?:과|국|관|팀|담당관|정책관|센터))\)/g) || [];
-  for (const ph of parenHits) {
-    const dept = cleanupDepartment(ph);
-    if (dept) return dept;
-  }
-  return null;
-}
-
 function pickMainContent($) {
   let best = "";
   for (const selector of ARTICLE_SELECTORS) {
     const text = normalizeText($(selector).text());
-    if (text.length > best.length) {
-      best = text;
-    }
+    if (text.length > best.length) best = text;
   }
   if (best.length > 120) return best;
   return normalizeText($("#contents").text() || $("body").text());
@@ -102,7 +53,8 @@ function decodeHtml(buffer, contentType = "") {
     const metaHit = ascii.match(/charset\s*=\s*["']?([a-z0-9\-_]+)/i);
     if (metaHit) charset = metaHit[1].toLowerCase();
   }
-  if (charset.includes("ks_c_5601") || charset.includes("euc-kr")) {
+
+  if (charset.includes("ks_c_5601") || charset.includes("euc-kr") || charset.includes("cp949")) {
     return iconv.decode(Buffer.from(buffer), "euc-kr");
   }
   return iconv.decode(Buffer.from(buffer), "utf-8");
@@ -144,6 +96,7 @@ async function fetchListPage(pageIndex) {
     const href = $(el).attr("href") || "";
     const hit = href.match(/news_seq=(\d+)/);
     if (!hit) return;
+
     const newsSeq = hit[1];
     if (seen.has(newsSeq)) return;
     seen.add(newsSeq);
@@ -160,6 +113,7 @@ async function fetchListPage(pageIndex) {
       candidates.sort((a, b) => b.length - a.length);
       title = candidates[0] || title;
     }
+
     const date = parseDate(rowText);
     if (!title) return;
 
@@ -175,6 +129,7 @@ async function fetchListPage(pageIndex) {
     const onclick = $(el).attr("onclick") || "";
     const hit = onclick.match(/news_seq[=:'",\s]+(\d+)/);
     if (!hit) return;
+
     const newsSeq = hit[1];
     if (seen.has(newsSeq)) return;
     seen.add(newsSeq);
@@ -191,6 +146,7 @@ async function fetchListPage(pageIndex) {
       candidates.sort((a, b) => b.length - a.length);
       title = candidates[0] || title;
     }
+
     const date = parseDate(rowText);
     if (!title) return;
 
@@ -222,27 +178,21 @@ async function fetchDetail(newsSeq) {
   const $ = cheerio.load(html);
   const ogTitle = normalizeText($("meta[property='og:title']").attr("content"));
   const h3Title = normalizeText($("h3").first().text());
-  const pageTitle = normalizeText($("title").text()).replace(/\s*-\s*고용노동부\s*$/, "");
+  const pageTitle = normalizeText($("title").text()).replace(/\s*-\s*\uACE0\uC6A9\uB178\uB3D9\uBD80\s*$/, "");
+
   let title = ogTitle || h3Title || pageTitle;
-  if (isGenericTitle(title)) {
-    title = "";
-  }
+  if (isGenericTitle(title)) title = "";
 
   const content = pickMainContent($);
   const wholeText = normalizeText($("body").text());
-
-  const date =
-    parseDate(wholeText) ||
-    parseDate(content) ||
-    parseDate(title);
-
-  const department = extractDepartment(content) || extractDepartment(wholeText);
+  const date = parseDate(wholeText) || parseDate(content) || parseDate(title);
 
   return {
     newsSeq: String(newsSeq),
     title,
     date,
-    department: department || "미상",
+    // Department must be assigned only from law.go.kr dictionary in build-model.
+    department: MISANG,
     content,
     url,
     crawledAt: new Date().toISOString(),
@@ -253,12 +203,14 @@ async function mapLimit(list, limit, worker) {
   const result = new Array(list.length);
   let idx = 0;
   let active = 0;
+
   return new Promise((resolve) => {
     const run = () => {
       while (active < limit && idx < list.length) {
         const current = idx;
         idx += 1;
         active += 1;
+
         worker(list[current])
           .then((res) => {
             result[current] = res;
@@ -283,9 +235,7 @@ async function mapLimit(list, limit, worker) {
 function toCsv(rows) {
   const header = ["newsSeq", "date", "department", "title", "content", "url"];
   const escaped = rows.map((row) =>
-    header
-      .map((k) => `"${String(row[k] || "").replace(/"/g, '""')}"`)
-      .join(","),
+    header.map((k) => `"${String(row[k] || "").replace(/"/g, '""')}"`).join(","),
   );
   return [header.join(","), ...escaped].join("\n");
 }
@@ -294,12 +244,14 @@ async function run(options) {
   const years = Number(options.years || 3);
   const maxPages = Number(options.maxPages || 500);
   const outPath = path.resolve(options.out || "data/moel_press_releases_3y.json");
+
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - years);
   const cutoffYmd = cutoff.toISOString().slice(0, 10);
 
   const metas = [];
   let oldPageStreak = 0;
+
   for (let page = 1; page <= maxPages; page += 1) {
     const pageItems = await fetchListPage(page);
     if (!pageItems.length) break;
@@ -320,9 +272,7 @@ async function run(options) {
     }
   }
 
-  const dedup = Array.from(
-    new Map(metas.map((m) => [m.newsSeq, m])).values(),
-  );
+  const dedup = Array.from(new Map(metas.map((m) => [m.newsSeq, m])).values());
   const details = await mapLimit(dedup, 5, async (meta) => {
     const item = await fetchDetail(meta.newsSeq);
     if (item.date && item.date < cutoffYmd) return null;
@@ -331,7 +281,7 @@ async function run(options) {
       ...item,
       title: !isGenericTitle(item.title) ? item.title : meta.title,
       date: item.date || meta.date,
-      department: item.department || "미상",
+      department: MISANG,
     };
   });
 
@@ -340,24 +290,15 @@ async function run(options) {
   fs.writeFileSync(outPath, JSON.stringify(details, null, 2), "utf8");
   fs.writeFileSync(outPath.replace(/\.json$/i, ".csv"), toCsv(details), "utf8");
 
-  const byDept = {};
-  for (const d of details) {
-    byDept[d.department] = (byDept[d.department] || 0) + 1;
-  }
-  const topDept = Object.entries(byDept)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-
   console.log(`Saved: ${outPath}`);
   console.log(`Rows: ${details.length} | cutoff: ${cutoffYmd}`);
-  console.log("Top departments:", topDept);
 }
 
 const program = new Command();
 program
-  .option("--years <number>", "최근 n년 데이터 수집", "3")
-  .option("--maxPages <number>", "최대 목록 페이지 수", "500")
-  .option("--out <path>", "출력 JSON 경로", "data/moel_press_releases_3y.json");
+  .option("--years <number>", "collect recent n years", "3")
+  .option("--maxPages <number>", "maximum list pages", "500")
+  .option("--out <path>", "output json path", "data/moel_press_releases_3y.json");
 
 program.parse(process.argv);
 run(program.opts()).catch((err) => {

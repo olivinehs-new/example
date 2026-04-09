@@ -9,6 +9,8 @@ const {
 } = require("./department-utils");
 const { cosineQueryMapToSparseArray } = require("./model-format");
 
+const MISANG = "미상";
+
 function loadModel(modelPath) {
   const raw = fs.readFileSync(path.resolve(modelPath), "utf8").replace(/^\uFEFF/, "");
   return JSON.parse(raw);
@@ -51,6 +53,62 @@ function cosineAgainstStored(queryIdMap, storedVec) {
     if (q) dot += q * v;
   }
   return dot;
+}
+
+function splitSentences(text) {
+  const src = normalizeText(text);
+  if (!src) return [];
+  return src
+    .split(/(?<=[.!?。！？]|\n)/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 10);
+}
+
+function sentenceScore(sentence, idfDict, keyTerms) {
+  const vec = vectorize(sentence, idfDict);
+  let score = 0;
+  for (const v of Object.values(vec)) score += Number(v || 0);
+  for (const t of keyTerms) {
+    if (t && sentence.includes(t)) score += 0.4;
+  }
+  score += Math.min(sentence.length, 220) / 2200;
+  return score;
+}
+
+function summarizeText(text, idfDict, maxSentences = 3, maxChars = 420) {
+  const sentences = splitSentences(text);
+  if (!sentences.length) {
+    const fallback = normalizeText(text).slice(0, maxChars).trim();
+    return {
+      summaryText: fallback,
+      sentenceCount: fallback ? 1 : 0,
+      method: "truncate-fallback",
+    };
+  }
+
+  const keyTerms = topKeywords(text, idfDict, 8);
+  const ranked = sentences
+    .map((s, i) => ({ index: i, sentence: s, score: sentenceScore(s, idfDict, keyTerms) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(1, maxSentences))
+    .sort((a, b) => a.index - b.index);
+
+  const picked = [];
+  let len = 0;
+  for (const x of ranked) {
+    const nextLen = len + (picked.length ? 1 : 0) + x.sentence.length;
+    if (picked.length && nextLen > maxChars) continue;
+    picked.push(x.sentence);
+    len = nextLen;
+  }
+
+  if (!picked.length) picked.push(ranked[0].sentence.slice(0, maxChars));
+
+  return {
+    summaryText: picked.join(" "),
+    sentenceCount: picked.length,
+    method: "extractive-keysentence",
+  };
 }
 
 function predictDepartment(queryIdMap, centroids, queryText, legalData = null) {
@@ -98,13 +156,13 @@ function makeDepartmentMembershipIndexes(model, legalData = null) {
   const pressSet = new Set();
   for (const doc of model.documents || []) {
     const dept = normalizeDepartmentName(doc.department, legalData);
-    if (dept && dept !== "誘몄긽") pressSet.add(dept);
+    if (dept && dept !== MISANG) pressSet.add(dept);
   }
 
   const legalSet = new Set();
   for (const dept of legalData?.departments || []) {
     const normalized = normalizeDepartmentName(dept, legalData);
-    if (normalized && normalized !== "誘몄긽") legalSet.add(normalized);
+    if (normalized && normalized !== MISANG) legalSet.add(normalized);
   }
 
   return { pressSet, legalSet };
@@ -114,7 +172,7 @@ function summarizePressMatchedDepartments(similarDocs, legalData = null) {
   const stats = new Map();
   for (const doc of similarDocs || []) {
     const dept = normalizeDepartmentName(doc.department, legalData);
-    if (!dept || dept === "誘몄긽") continue;
+    if (!dept || dept === MISANG) continue;
 
     const current = stats.get(dept) || { count: 0, maxSimilarity: 0 };
     current.count += 1;
@@ -135,8 +193,11 @@ function summarizePressMatchedDepartments(similarDocs, legalData = null) {
 }
 
 function classifyText({ model, text, topK = 5, topics = 6, legalData = null }) {
-  const queryText = normalizeText(text);
+  const inputText = normalizeText(text);
   const idfDict = toIdfDict(model);
+  const summary = summarizeText(inputText, idfDict, 3, 420);
+  const queryText = summary.summaryText || inputText;
+
   const queryVector = vectorize(queryText, idfDict);
   const queryIdMap = queryVectorToIdMap(queryVector, model);
 
@@ -148,12 +209,12 @@ function classifyText({ model, text, topK = 5, topics = 6, legalData = null }) {
   const lawTopSet = new Set(
     (legalData?.topDepartments || [])
       .map((d) => normalizeDepartmentName(d, legalData))
-      .filter((d) => d && d !== "誘몄긽"),
+      .filter((d) => d && d !== MISANG),
   );
   const similarMatchedSet = new Set(
     similar
       .map((d) => normalizeDepartmentName(d.department, legalData))
-      .filter((d) => d && d !== "誘몄긽"),
+      .filter((d) => d && d !== MISANG),
   );
 
   const likelyDepartments = depRanking.slice(0, 5).map((x) => {
@@ -172,20 +233,24 @@ function classifyText({ model, text, topK = 5, topics = 6, legalData = null }) {
   });
 
   const pressMatchedDepartments = summarizePressMatchedDepartments(similar, legalData);
-  const predictedDepartmentDetail =
-    likelyDepartments[0] || {
-      department: "誘몄긽",
-      score: 0,
-      cosine: 0,
-      legalScore: 0,
-      lawTopScore: 0,
-      matchedInPress: false,
-      matchedInSimilarReferences: false,
-      inMoelOrganization: false,
-      inLawTopDepartments: false,
-    };
+  const predictedDepartmentDetail = likelyDepartments[0] || {
+    department: MISANG,
+    score: 0,
+    cosine: 0,
+    legalScore: 0,
+    lawTopScore: 0,
+    matchedInPress: false,
+    matchedInSimilarReferences: false,
+    inMoelOrganization: false,
+    inLawTopDepartments: false,
+  };
 
   return {
+    inputSummary: {
+      originalLength: inputText.length,
+      summaryLength: queryText.length,
+      ...summary,
+    },
     predictedDepartment: predictedDepartmentDetail.department,
     confidence: predictedDepartmentDetail.score,
     predictedDepartmentDetail,
@@ -228,4 +293,5 @@ module.exports = {
   classifyText,
   classifyWithModelPath,
   loadLegalDepartmentData,
+  summarizeText,
 };
