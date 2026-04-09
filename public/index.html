@@ -8,7 +8,10 @@
   </head>
   <body>
     <main class="wrap">
-      <h1>고용노동부 문서분류기</h1>
+      <div class="title-row">
+        <h1>고용노동부 문서분류기</h1>
+        <span id="appVersion" class="version-badge">v-</span>
+      </div>
       <p class="desc">텍스트 입력만으로 담당부서와 주요 내용을 분류합니다.</p>
 
       <section class="panel">
@@ -16,7 +19,7 @@
         <form id="classifyForm">
           <label class="field">
             <span>텍스트 입력</span>
-            <textarea id="textInput" name="text" rows="8" placeholder="민원/문의/QnA 내용을 입력하세요."></textarea>
+            <textarea id="textInput" name="text" rows="8" placeholder="민원/문의/QnA 내용을 입력하세요"></textarea>
           </label>
 
           <div class="row">

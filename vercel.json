@@ -2,16 +2,10 @@
   "version": 2,
   "functions": {
     "api/classify.js": {
-      "includeFiles": [
-        "model/**/*.json",
-        "data/moel_legal_departments.json"
-      ]
+      "includeFiles": "{model/**/*.json,data/moel_legal_departments.json}"
     },
     "api/meta.js": {
-      "includeFiles": [
-        "model/**/*.json",
-        "data/moel_legal_departments.json"
-      ]
+      "includeFiles": "{model/**/*.json,data/moel_legal_departments.json}"
     }
   },
   "rewrites": [

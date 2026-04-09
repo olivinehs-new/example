@@ -2,6 +2,7 @@ const form = document.getElementById("classifyForm");
 const resultBox = document.getElementById("resultBox");
 const metaBox = document.getElementById("metaBox");
 const submitBtn = document.getElementById("submitBtn");
+const appVersion = document.getElementById("appVersion");
 
 async function readJsonSafely(res) {
   const raw = await res.text();
@@ -9,6 +10,24 @@ async function readJsonSafely(res) {
     return { json: JSON.parse(raw), raw };
   } catch (_) {
     return { json: null, raw };
+  }
+}
+
+async function loadVersion() {
+  if (!appVersion) return;
+
+  try {
+    const res = await fetch(`/version.json?t=${Date.now()}`, {
+      cache: "no-store",
+    });
+    const { json } = await readJsonSafely(res);
+    if (res.ok && json && json.version) {
+      appVersion.textContent = `v${json.version}`;
+      return;
+    }
+    appVersion.textContent = "v-";
+  } catch (_) {
+    appVersion.textContent = "v-";
   }
 }
 
@@ -36,11 +55,18 @@ form.addEventListener("submit", async (e) => {
     const text = String(form.text.value || "").trim();
     const topk = Number(form.topk.value || 5);
     const topics = Number(form.topics.value || 6);
+
+    if (!text) {
+      resultBox.textContent = "입력 텍스트가 비어 있습니다.";
+      return;
+    }
+
     const res = await fetch("/api/classify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, topk, topics }),
     });
+
     const { json, raw } = await readJsonSafely(res);
 
     if (!json) {
@@ -49,6 +75,7 @@ form.addEventListener("submit", async (e) => {
         raw.slice(0, 600);
       return;
     }
+
     if (!res.ok) {
       resultBox.textContent = JSON.stringify(
         { error: json.error || "요청 실패", status: res.status, body: json },
@@ -57,6 +84,7 @@ form.addEventListener("submit", async (e) => {
       );
       return;
     }
+
     resultBox.textContent = JSON.stringify(json, null, 2);
   } catch (err) {
     resultBox.textContent = `classify failed: ${err.message}`;
@@ -66,4 +94,5 @@ form.addEventListener("submit", async (e) => {
   }
 });
 
+loadVersion();
 loadMeta();
