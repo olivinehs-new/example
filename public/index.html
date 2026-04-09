@@ -19,20 +19,8 @@
         <form id="classifyForm">
           <label class="field">
             <span>텍스트 입력</span>
-            <textarea id="textInput" name="text" rows="8" placeholder="민원/문의/QnA 내용을 입력하세요"></textarea>
+            <textarea id="textInput" name="text" rows="10" placeholder="민원/문의/QnA 내용을 입력하세요"></textarea>
           </label>
-
-          <div class="row">
-            <label>
-              유사문서 수
-              <input type="number" name="topk" value="5" min="1" max="10" />
-            </label>
-            <label>
-              키워드 수
-              <input type="number" name="topics" value="6" min="3" max="12" />
-            </label>
-          </div>
-
           <button type="submit" id="submitBtn">분류 실행</button>
         </form>
       </section>

@@ -38,8 +38,8 @@ async function loadMeta() {
   }
 }
 
-function yesNo(value) {
-  return value ? "예" : "아니오";
+function yesNo(v) {
+  return v ? "예" : "아니오";
 }
 
 function formatClassifyResult(payload) {
@@ -51,7 +51,7 @@ function formatClassifyResult(payload) {
   if (r.inputSummary) {
     lines.push("[AI 요약]");
     lines.push(`- 요약문: ${r.inputSummary.summaryText || ""}`);
-    lines.push(`- 길이: 원문 ${r.inputSummary.originalLength || 0}자 → 요약 ${r.inputSummary.summaryLength || 0}자`);
+    lines.push(`- 길이: 원문 ${r.inputSummary.originalLength || 0}자 -> 요약 ${r.inputSummary.summaryLength || 0}자`);
     lines.push("");
   }
 
@@ -101,9 +101,6 @@ form.addEventListener("submit", async (e) => {
 
   try {
     const text = String(form.text.value || "").trim();
-    const topk = Number(form.topk.value || 5);
-    const topics = Number(form.topics.value || 6);
-
     if (!text) {
       resultBox.textContent = "입력 텍스트가 비어 있습니다.";
       return;
@@ -112,7 +109,7 @@ form.addEventListener("submit", async (e) => {
     const res = await fetch("/api/classify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, topk, topics }),
+      body: JSON.stringify({ text }),
     });
 
     const { json, raw } = await readJsonSafely(res);

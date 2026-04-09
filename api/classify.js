@@ -40,9 +40,7 @@ module.exports = async (req, res) => {
       return;
     }
     if (!fs.existsSync(absLegalPath)) {
-      res
-        .status(503)
-        .json({ error: "Legal department dictionary file is missing in deployment.", legalPath: absLegalPath });
+      res.status(503).json({ error: "Legal department dictionary file is missing in deployment.", legalPath: absLegalPath });
       return;
     }
 
@@ -61,9 +59,6 @@ module.exports = async (req, res) => {
     }
 
     const textInput = String(body.text || "").trim();
-    const topK = Number(body.topk || 5) || 5;
-    const topics = Number(body.topics || 6) || 6;
-
     if (!textInput) {
       res.status(400).json({ error: "입력 텍스트가 없습니다. 텍스트를 입력해 주세요." });
       return;
@@ -73,8 +68,8 @@ module.exports = async (req, res) => {
       modelPath: absModelPath,
       legalPath: absLegalPath,
       text: textInput,
-      topK,
-      topics,
+      topK: 5,
+      topics: 6,
     });
 
     res.status(200).json({

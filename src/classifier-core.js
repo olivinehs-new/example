@@ -10,6 +10,7 @@ const {
 const { cosineQueryMapToSparseArray } = require("./model-format");
 
 const MISANG = "미상";
+const PRESS_SCORE_BOOST = 1.25;
 
 function loadModel(modelPath) {
   const raw = fs.readFileSync(path.resolve(modelPath), "utf8").replace(/^\uFEFF/, "");
@@ -19,9 +20,7 @@ function loadModel(modelPath) {
 function toIdfDict(model) {
   if (Array.isArray(model.terms) && Array.isArray(model.idf)) {
     const out = {};
-    for (let i = 0; i < model.terms.length; i += 1) {
-      out[model.terms[i]] = model.idf[i];
-    }
+    for (let i = 0; i < model.terms.length; i += 1) out[model.terms[i]] = model.idf[i];
     return out;
   }
   return model.idf || {};
@@ -30,22 +29,18 @@ function toIdfDict(model) {
 function queryVectorToIdMap(queryVector, model) {
   if (!Array.isArray(model.terms)) return queryVector;
   const termToId = {};
-  for (let i = 0; i < model.terms.length; i += 1) {
-    termToId[model.terms[i]] = i;
-  }
+  for (let i = 0; i < model.terms.length; i += 1) termToId[model.terms[i]] = i;
 
   const out = {};
-  for (const [term, w] of Object.entries(queryVector || {})) {
+  for (const [term, weight] of Object.entries(queryVector || {})) {
     const id = termToId[term];
-    if (id !== undefined) out[id] = w;
+    if (id !== undefined) out[id] = weight;
   }
   return out;
 }
 
 function cosineAgainstStored(queryIdMap, storedVec) {
-  if (Array.isArray(storedVec)) {
-    return cosineQueryMapToSparseArray(queryIdMap, storedVec);
-  }
+  if (Array.isArray(storedVec)) return cosineQueryMapToSparseArray(queryIdMap, storedVec);
 
   let dot = 0;
   for (const [k, v] of Object.entries(storedVec || {})) {
@@ -68,8 +63,8 @@ function sentenceScore(sentence, idfDict, keyTerms) {
   const vec = vectorize(sentence, idfDict);
   let score = 0;
   for (const v of Object.values(vec)) score += Number(v || 0);
-  for (const t of keyTerms) {
-    if (t && sentence.includes(t)) score += 0.4;
+  for (const term of keyTerms) {
+    if (term && sentence.includes(term)) score += 0.4;
   }
   score += Math.min(sentence.length, 220) / 2200;
   return score;
@@ -88,7 +83,11 @@ function summarizeText(text, idfDict, maxSentences = 3, maxChars = 420) {
 
   const keyTerms = topKeywords(text, idfDict, 8);
   const ranked = sentences
-    .map((s, i) => ({ index: i, sentence: s, score: sentenceScore(s, idfDict, keyTerms) }))
+    .map((sentence, index) => ({
+      index,
+      sentence,
+      score: sentenceScore(sentence, idfDict, keyTerms),
+    }))
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.max(1, maxSentences))
     .sort((a, b) => a.index - b.index);
@@ -112,27 +111,36 @@ function summarizeText(text, idfDict, maxSentences = 3, maxChars = 420) {
 }
 
 function predictDepartment(queryIdMap, centroids, queryText, legalData = null) {
-  const scored = Object.entries(centroids).map(([dept, vec]) => {
+  const scored = Object.entries(centroids || {}).map(([department, vec]) => {
     const cosine = cosineAgainstStored(queryIdMap, vec);
-    const legalScore = legalDepartmentKeywordScore(queryText, dept);
-    const lawTopScore = lawTopDepartmentScore(queryText, dept, legalData);
+    const pressScore = cosine * PRESS_SCORE_BOOST;
+    const legalScore = legalDepartmentKeywordScore(queryText, department);
+    const lawTopScore = lawTopDepartmentScore(queryText, department, legalData);
+
     return {
-      department: dept,
-      score: cosine * 0.8 + legalScore * 0.15 + lawTopScore * 0.05,
+      department,
+      score: pressScore * 0.8 + legalScore * 0.15 + lawTopScore * 0.05,
       cosine,
+      pressScore,
       legalScore,
       lawTopScore,
     };
   });
+
   scored.sort((a, b) => b.score - a.score);
   return scored;
 }
 
 function retrieveSimilarDocs(queryIdMap, documents, topK = 5) {
-  const scored = documents.map((doc) => ({
-    ...doc,
-    similarity: cosineAgainstStored(queryIdMap, doc.vector || {}),
-  }));
+  const scored = (documents || []).map((doc) => {
+    const rawSimilarity = cosineAgainstStored(queryIdMap, doc.vector || {});
+    return {
+      ...doc,
+      rawSimilarity,
+      similarity: rawSimilarity * PRESS_SCORE_BOOST,
+    };
+  });
+
   scored.sort((a, b) => b.similarity - a.similarity);
   return scored.slice(0, topK);
 }
@@ -201,7 +209,7 @@ function classifyText({ model, text, topK = 5, topics = 6, legalData = null }) {
   const queryVector = vectorize(queryText, idfDict);
   const queryIdMap = queryVectorToIdMap(queryVector, model);
 
-  const depRanking = predictDepartment(queryIdMap, model.departmentCentroids, queryText, legalData);
+  const depRankingAll = predictDepartment(queryIdMap, model.departmentCentroids, queryText, legalData);
   const similar = retrieveSimilarDocs(queryIdMap, model.documents, Number(topK));
   const mainTopics = aggregateTopics(queryText, similar, idfDict, Number(topics));
 
@@ -217,12 +225,19 @@ function classifyText({ model, text, topK = 5, topics = 6, legalData = null }) {
       .filter((d) => d && d !== MISANG),
   );
 
+  // Restrict recommended departments to law.go.kr legal department list only.
+  const depRanking = depRankingAll.filter((x) => {
+    const normalizedDept = normalizeDepartmentName(x.department, legalData);
+    return normalizedDept && normalizedDept !== MISANG && legalSet.has(normalizedDept);
+  });
+
   const likelyDepartments = depRanking.slice(0, 5).map((x) => {
     const normalizedDept = normalizeDepartmentName(x.department, legalData);
     return {
       department: normalizedDept,
       score: Number(x.score.toFixed(4)),
       cosine: Number(x.cosine.toFixed(4)),
+      pressScore: Number((x.pressScore || 0).toFixed(4)),
       legalScore: Number(x.legalScore.toFixed(4)),
       lawTopScore: Number((x.lawTopScore || 0).toFixed(4)),
       matchedInPress: pressSet.has(normalizedDept),
@@ -237,6 +252,7 @@ function classifyText({ model, text, topK = 5, topics = 6, legalData = null }) {
     department: MISANG,
     score: 0,
     cosine: 0,
+    pressScore: 0,
     legalScore: 0,
     lawTopScore: 0,
     matchedInPress: false,
@@ -264,6 +280,7 @@ function classifyText({ model, text, topK = 5, topics = 6, legalData = null }) {
       title: d.title,
       department: normalizeDepartmentName(d.department, legalData),
       similarity: Number(d.similarity.toFixed(4)),
+      rawSimilarity: Number((d.rawSimilarity || 0).toFixed(4)),
       url: d.url,
     })),
   };
