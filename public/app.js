@@ -33,8 +33,14 @@ form.addEventListener("submit", async (e) => {
   resultBox.textContent = "요청 처리 중...";
 
   try {
-    const fd = new FormData(form);
-    const res = await fetch("/api/classify", { method: "POST", body: fd });
+    const text = String(form.text.value || "").trim();
+    const topk = Number(form.topk.value || 5);
+    const topics = Number(form.topics.value || 6);
+    const res = await fetch("/api/classify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, topk, topics }),
+    });
     const { json, raw } = await readJsonSafely(res);
 
     if (!json) {
