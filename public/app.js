@@ -1,4 +1,4 @@
-const form = document.getElementById("classifyForm");
+﻿const form = document.getElementById("classifyForm");
 const resultBox = document.getElementById("resultBox");
 const metaBox = document.getElementById("metaBox");
 const submitBtn = document.getElementById("submitBtn");
@@ -15,17 +15,10 @@ async function readJsonSafely(res) {
 
 async function loadVersion() {
   if (!appVersion) return;
-
   try {
-    const res = await fetch(`/version.json?t=${Date.now()}`, {
-      cache: "no-store",
-    });
+    const res = await fetch(`/version.json?t=${Date.now()}`, { cache: "no-store" });
     const { json } = await readJsonSafely(res);
-    if (res.ok && json && json.version) {
-      appVersion.textContent = `v${json.version}`;
-      return;
-    }
-    appVersion.textContent = "v-";
+    appVersion.textContent = res.ok && json && json.version ? `v${json.version}` : "v-";
   } catch (_) {
     appVersion.textContent = "v-";
   }
@@ -36,13 +29,61 @@ async function loadMeta() {
     const res = await fetch("/api/meta");
     const { json, raw } = await readJsonSafely(res);
     if (!json) {
-      metaBox.textContent = `meta load failed: JSON이 아닌 응답\nstatus=${res.status}\n${raw.slice(0, 300)}`;
+      metaBox.textContent = `meta load failed: non-JSON response\nstatus=${res.status}\n${raw.slice(0, 300)}`;
       return;
     }
     metaBox.textContent = JSON.stringify(json, null, 2);
   } catch (err) {
     metaBox.textContent = `meta load failed: ${err.message}`;
   }
+}
+
+function yesNo(value) {
+  return value ? "예" : "아니오";
+}
+
+function formatClassifyResult(payload) {
+  const r = payload?.result || {};
+  const likely = Array.isArray(r.likelyDepartments) ? r.likelyDepartments : [];
+  const pressMatched = Array.isArray(r.pressMatchedDepartments) ? r.pressMatchedDepartments : [];
+
+  const lines = [];
+  lines.push("[예측 부서]");
+  lines.push(`- 부서: ${r.predictedDepartment || "미상"}`);
+  lines.push(`- 신뢰도: ${Number(r.confidence || 0).toFixed(4)}`);
+
+  if (r.predictedDepartmentDetail) {
+    lines.push(`- 보도자료 매칭: ${yesNo(r.predictedDepartmentDetail.matchedInPress)}`);
+    lines.push(`- 유사 보도자료 상위매칭: ${yesNo(r.predictedDepartmentDetail.matchedInSimilarReferences)}`);
+    lines.push(`- 고용노동부 직제 포함: ${yesNo(r.predictedDepartmentDetail.inMoelOrganization)}`);
+    lines.push(`- 법령 상단표출 과 포함: ${yesNo(r.predictedDepartmentDetail.inLawTopDepartments)}`);
+  }
+
+  lines.push("");
+  lines.push("[가능성 높은 부서]");
+  if (!likely.length) {
+    lines.push("- 없음");
+  } else {
+    likely.forEach((d, i) => {
+      lines.push(
+        `${i + 1}. ${d.department} | score=${Number(d.score || 0).toFixed(4)} | 보도자료=${yesNo(d.matchedInPress)} | 직제=${yesNo(d.inMoelOrganization)} | 상단과=${yesNo(d.inLawTopDepartments)}`,
+      );
+    });
+  }
+
+  lines.push("");
+  lines.push("[보도자료 직접 매칭 부서(유사문서 기준)]");
+  if (!pressMatched.length) {
+    lines.push("- 없음");
+  } else {
+    pressMatched.forEach((d, i) => {
+      lines.push(`${i + 1}. ${d.department} | 매칭건수=${d.matchedCount} | 최대유사도=${Number(d.maxSimilarity || 0).toFixed(4)}`);
+    });
+  }
+
+  lines.push("\n[RAW JSON]");
+  lines.push(JSON.stringify(payload, null, 2));
+  return lines.join("\n");
 }
 
 form.addEventListener("submit", async (e) => {
@@ -70,9 +111,7 @@ form.addEventListener("submit", async (e) => {
     const { json, raw } = await readJsonSafely(res);
 
     if (!json) {
-      resultBox.textContent =
-        `classify failed: JSON이 아닌 응답\nstatus=${res.status}\n` +
-        raw.slice(0, 600);
+      resultBox.textContent = `classify failed: non-JSON response\nstatus=${res.status}\n${raw.slice(0, 600)}`;
       return;
     }
 
@@ -85,7 +124,7 @@ form.addEventListener("submit", async (e) => {
       return;
     }
 
-    resultBox.textContent = JSON.stringify(json, null, 2);
+    resultBox.textContent = formatClassifyResult(json);
   } catch (err) {
     resultBox.textContent = `classify failed: ${err.message}`;
   } finally {

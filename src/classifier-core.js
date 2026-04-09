@@ -1,13 +1,10 @@
 const fs = require("fs");
 const path = require("path");
-const {
-  vectorize,
-  topKeywords,
-  normalizeText,
-} = require("./text-utils");
+const { vectorize, topKeywords, normalizeText } = require("./text-utils");
 const {
   loadLegalDepartmentData,
   legalDepartmentKeywordScore,
+  lawTopDepartmentScore,
   normalizeDepartmentName,
 } = require("./department-utils");
 const { cosineQueryMapToSparseArray } = require("./model-format");
@@ -34,6 +31,7 @@ function queryVectorToIdMap(queryVector, model) {
   for (let i = 0; i < model.terms.length; i += 1) {
     termToId[model.terms[i]] = i;
   }
+
   const out = {};
   for (const [term, w] of Object.entries(queryVector || {})) {
     const id = termToId[term];
@@ -46,6 +44,7 @@ function cosineAgainstStored(queryIdMap, storedVec) {
   if (Array.isArray(storedVec)) {
     return cosineQueryMapToSparseArray(queryIdMap, storedVec);
   }
+
   let dot = 0;
   for (const [k, v] of Object.entries(storedVec || {})) {
     const q = queryIdMap[k];
@@ -58,11 +57,13 @@ function predictDepartment(queryIdMap, centroids, queryText, legalData = null) {
   const scored = Object.entries(centroids).map(([dept, vec]) => {
     const cosine = cosineAgainstStored(queryIdMap, vec);
     const legalScore = legalDepartmentKeywordScore(queryText, dept);
+    const lawTopScore = lawTopDepartmentScore(queryText, dept, legalData);
     return {
       department: dept,
-      score: cosine * 0.85 + legalScore * 0.15,
+      score: cosine * 0.8 + legalScore * 0.15 + lawTopScore * 0.05,
       cosine,
       legalScore,
+      lawTopScore,
     };
   });
   scored.sort((a, b) => b.score - a.score);
@@ -86,41 +87,111 @@ function aggregateTopics(queryText, similarDocs, idfDict, topN = 6) {
       score.set(kw, (score.get(kw) || 0) + doc.similarity * 10);
     }
   }
+
   return Array.from(score.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, topN)
     .map(([k]) => k);
 }
 
-function classifyText({
-  model,
-  text,
-  topK = 5,
-  topics = 6,
-  legalData = null,
-}) {
+function makeDepartmentMembershipIndexes(model, legalData = null) {
+  const pressSet = new Set();
+  for (const doc of model.documents || []) {
+    const dept = normalizeDepartmentName(doc.department, legalData);
+    if (dept && dept !== "誘몄긽") pressSet.add(dept);
+  }
+
+  const legalSet = new Set();
+  for (const dept of legalData?.departments || []) {
+    const normalized = normalizeDepartmentName(dept, legalData);
+    if (normalized && normalized !== "誘몄긽") legalSet.add(normalized);
+  }
+
+  return { pressSet, legalSet };
+}
+
+function summarizePressMatchedDepartments(similarDocs, legalData = null) {
+  const stats = new Map();
+  for (const doc of similarDocs || []) {
+    const dept = normalizeDepartmentName(doc.department, legalData);
+    if (!dept || dept === "誘몄긽") continue;
+
+    const current = stats.get(dept) || { count: 0, maxSimilarity: 0 };
+    current.count += 1;
+    current.maxSimilarity = Math.max(current.maxSimilarity, Number(doc.similarity || 0));
+    stats.set(dept, current);
+  }
+
+  return Array.from(stats.entries())
+    .sort((a, b) => {
+      if (b[1].maxSimilarity !== a[1].maxSimilarity) return b[1].maxSimilarity - a[1].maxSimilarity;
+      return b[1].count - a[1].count;
+    })
+    .map(([department, info]) => ({
+      department,
+      matchedCount: info.count,
+      maxSimilarity: Number(info.maxSimilarity.toFixed(4)),
+    }));
+}
+
+function classifyText({ model, text, topK = 5, topics = 6, legalData = null }) {
   const queryText = normalizeText(text);
   const idfDict = toIdfDict(model);
   const queryVector = vectorize(queryText, idfDict);
   const queryIdMap = queryVectorToIdMap(queryVector, model);
-  const depRanking = predictDepartment(
-    queryIdMap,
-    model.departmentCentroids,
-    queryText,
-    legalData,
-  );
+
+  const depRanking = predictDepartment(queryIdMap, model.departmentCentroids, queryText, legalData);
   const similar = retrieveSimilarDocs(queryIdMap, model.documents, Number(topK));
   const mainTopics = aggregateTopics(queryText, similar, idfDict, Number(topics));
 
-  return {
-    predictedDepartment: normalizeDepartmentName(depRanking[0]?.department || "미상", legalData),
-    confidence: Number((depRanking[0]?.score || 0).toFixed(4)),
-    departmentCandidates: depRanking.slice(0, 5).map((x) => ({
-      department: normalizeDepartmentName(x.department, legalData),
+  const { pressSet, legalSet } = makeDepartmentMembershipIndexes(model, legalData);
+  const lawTopSet = new Set(
+    (legalData?.topDepartments || [])
+      .map((d) => normalizeDepartmentName(d, legalData))
+      .filter((d) => d && d !== "誘몄긽"),
+  );
+  const similarMatchedSet = new Set(
+    similar
+      .map((d) => normalizeDepartmentName(d.department, legalData))
+      .filter((d) => d && d !== "誘몄긽"),
+  );
+
+  const likelyDepartments = depRanking.slice(0, 5).map((x) => {
+    const normalizedDept = normalizeDepartmentName(x.department, legalData);
+    return {
+      department: normalizedDept,
       score: Number(x.score.toFixed(4)),
       cosine: Number(x.cosine.toFixed(4)),
       legalScore: Number(x.legalScore.toFixed(4)),
-    })),
+      lawTopScore: Number((x.lawTopScore || 0).toFixed(4)),
+      matchedInPress: pressSet.has(normalizedDept),
+      matchedInSimilarReferences: similarMatchedSet.has(normalizedDept),
+      inMoelOrganization: legalSet.has(normalizedDept),
+      inLawTopDepartments: lawTopSet.has(normalizedDept),
+    };
+  });
+
+  const pressMatchedDepartments = summarizePressMatchedDepartments(similar, legalData);
+  const predictedDepartmentDetail =
+    likelyDepartments[0] || {
+      department: "誘몄긽",
+      score: 0,
+      cosine: 0,
+      legalScore: 0,
+      lawTopScore: 0,
+      matchedInPress: false,
+      matchedInSimilarReferences: false,
+      inMoelOrganization: false,
+      inLawTopDepartments: false,
+    };
+
+  return {
+    predictedDepartment: predictedDepartmentDetail.department,
+    confidence: predictedDepartmentDetail.score,
+    predictedDepartmentDetail,
+    likelyDepartments,
+    pressMatchedDepartments,
+    departmentCandidates: likelyDepartments,
     mainTopics,
     similarReferences: similar.map((d) => ({
       newsSeq: d.newsSeq,

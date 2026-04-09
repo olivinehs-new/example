@@ -1,6 +1,6 @@
 {
   "name": "example",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "MOEL press-release based document classifier (department + main topics)",
   "main": "src/classify.js",
   "scripts": {
@@ -21,3 +21,4 @@
     "iconv-lite": "^0.7.2"
   }
 }
+

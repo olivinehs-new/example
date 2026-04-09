@@ -65,7 +65,7 @@ module.exports = async (req, res) => {
     const topics = Number(body.topics || 6) || 6;
 
     if (!textInput) {
-      res.status(400).json({ error: "입력 텍스트가 없습니다. 텍스트를 입력해주세요." });
+      res.status(400).json({ error: "입력 텍스트가 없습니다. 텍스트를 입력해 주세요." });
       return;
     }
 
