@@ -95,6 +95,23 @@ app.post("/api/classify", upload.single("file"), async (req, res) => {
   }
 });
 
+app.use("/api", (req, res) => {
+  res.status(404).json({
+    error: "API endpoint not found",
+    path: req.originalUrl,
+    method: req.method,
+  });
+});
+
+app.use((err, req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "Internal server error" });
+    return;
+  }
+  next(err);
+});
+
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
